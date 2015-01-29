@@ -1,10 +1,111 @@
 
 import unittest
-from spake2 import SPAKE2, SPAKE2_P, SPAKE2_Q, PAKEError, \
-     params_80, params_112, params_128
+#from .spake2 import (SPAKE2, SPAKE2_P, SPAKE2_Q, PAKEError,
+#                     params_80, params_112, params_128)
+from . import util
 from binascii import hexlify
 from hashlib import sha256
 import json
+
+class Utils(unittest.TestCase):
+    def test_binsize(self):
+        def sizebb(maxval):
+            num_bits = util.size_bits(maxval)
+            num_bytes = util.size_bytes(maxval)
+            return (num_bytes, num_bits)
+        self.failUnlessEqual(sizebb(0x0f), (1, 4))
+        self.failUnlessEqual(sizebb(0x1f), (1, 5))
+        self.failUnlessEqual(sizebb(0x10), (1, 5))
+        self.failUnlessEqual(sizebb(0xff), (1, 8))
+        self.failUnlessEqual(sizebb(0x100), (2, 9))
+        self.failUnlessEqual(sizebb(0x101), (2, 9))
+        self.failUnlessEqual(sizebb(0x1fe), (2, 9))
+        self.failUnlessEqual(sizebb(0x1ff), (2, 9))
+        self.failUnlessEqual(sizebb(2**255-19), (32, 255))
+
+    def test_number_to_bytes(self):
+        n2b = util.number_to_bytes
+        self.failUnlessEqual(n2b(0x00, 0xff), b"\x00")
+        self.failUnlessEqual(n2b(0x01, 0xff), b"\x01")
+        self.failUnlessEqual(n2b(0xff, 0xff), b"\xff")
+        self.failUnlessEqual(n2b(0x100, 0xffff), b"\x01\x00")
+        self.failUnlessEqual(n2b(0x101, 0xffff), b"\x01\x01")
+        self.failUnlessEqual(n2b(0x102, 0xffff), b"\x01\x02")
+        self.failUnlessEqual(n2b(0x1fe, 0xffff), b"\x01\xfe")
+        self.failUnlessEqual(n2b(0x1ff, 0xffff), b"\x01\xff")
+        self.failUnlessEqual(n2b(0x200, 0xffff), b"\x02\x00")
+        self.failUnlessEqual(n2b(0xffff, 0xffff), b"\xff\xff")
+        self.failUnlessEqual(n2b(0x10000, 0xffffff), b"\x01\x00\x00")
+        self.failUnlessEqual(n2b(0x1, 0xffffffff), b"\x00\x00\x00\x01")
+        self.failUnlessRaises(ValueError, n2b, 0x10000, 0xff)
+
+    def test_bytes_to_number(self):
+        b2n = util.bytes_to_number
+        self.failUnlessEqual(b2n(b"\x00"), 0x00)
+        self.failUnlessEqual(b2n(b"\x01"), 0x01)
+        self.failUnlessEqual(b2n(b"\xff"), 0xff)
+        self.failUnlessEqual(b2n(b"\x01\x00"), 0x0100)
+        self.failUnlessEqual(b2n(b"\x01\x01"), 0x0101)
+        self.failUnlessEqual(b2n(b"\x01\x02"), 0x0102)
+        self.failUnlessEqual(b2n(b"\x01\xfe"), 0x01fe)
+        self.failUnlessEqual(b2n(b"\x01\xff"), 0x01ff)
+        self.failUnlessEqual(b2n(b"\x02\x00"), 0x0200)
+        self.failUnlessEqual(b2n(b"\xff\xff"), 0xffff)
+        self.failUnlessEqual(b2n(b"\x01\x00\x00"), 0x010000)
+        self.failUnlessEqual(b2n(b"\x00\x00\x00\x01"), 0x01)
+        self.failUnlessRaises(TypeError, b2n, 42)
+        if type("") != type(b""):
+            self.failUnlessRaises(TypeError, b2n, "not bytes")
+
+    def test_mask(self):
+        gen = util.generate_mask
+        self.failUnlessEqual(gen(0x01), (0x01, 1))
+        self.failUnlessEqual(gen(0x02), (0x03, 1))
+        self.failUnlessEqual(gen(0x03), (0x03, 1))
+        self.failUnlessEqual(gen(0x04), (0x07, 1))
+        self.failUnlessEqual(gen(0x07), (0x07, 1))
+        self.failUnlessEqual(gen(0x08), (0x0f, 1))
+        self.failUnlessEqual(gen(0x09), (0x0f, 1))
+        self.failUnlessEqual(gen(0x0f), (0x0f, 1))
+        self.failUnlessEqual(gen(0x10), (0x1f, 1))
+        self.failUnlessEqual(gen(0x7f), (0x7f, 1))
+        self.failUnlessEqual(gen(0x80), (0xff, 1))
+        self.failUnlessEqual(gen(0xff), (0xff, 1))
+        self.failUnlessEqual(gen(0x0100), (0x01, 2))
+        self.failUnlessEqual(gen(2**255-19), (0x7f, 32))
+        mask = util.mask_list_of_ints
+        self.failUnlessEqual(mask(0x03, [0xff, 0x55, 0xaa]), [0x03, 0x55, 0xaa])
+        self.failUnlessEqual(mask(0xff, [0xff]), [0xff])
+    def test_l2n(self):
+        l2n = util.list_of_ints_to_number
+        self.failUnlessEqual(l2n([0x00]), 0x00)
+        self.failUnlessEqual(l2n([0x01]), 0x01)
+        self.failUnlessEqual(l2n([0x7f]), 0x7f)
+        self.failUnlessEqual(l2n([0x80]), 0x80)
+        self.failUnlessEqual(l2n([0xff]), 0xff)
+        self.failUnlessEqual(l2n([0x01, 0x00]), 0x0100)
+
+    def test_random_integer(self):
+        for seed in range(1000):
+            self.do_test_random_integer(254, seed)
+            self.do_test_random_integer(255, seed)
+            self.do_test_random_integer(256, seed)
+            self.do_test_random_integer(257, seed)
+
+    def do_test_random_integer(self, maxval, seed):
+        num = util.random_integer(maxval, entropy=FakeRandom(seed))
+        self.failUnless(num >= 0)
+        self.failUnless(num < maxval, (num, seed))
+
+class FakeRandom:
+    def __init__(self, seed):
+        self.data = sha256(str(seed).encode("ascii")).digest()
+    def __call__(self, num_bytes):
+        assert num_bytes < len(self.data)
+        ret = self.data[:num_bytes]
+        self.data = self.data[num_bytes:]
+        return ret
+
 
 class Basic(unittest.TestCase):
     def test_success(self):
@@ -123,6 +224,8 @@ class Errors(unittest.TestCase):
     def test_bad_side(self):
         self.failUnlessRaises(PAKEError,
                               SPAKE2, b"password", "R", params_80)
+
+del Basic, Parameters, PRNG, OtherEntropy, Serialize, Packed, Errors
 
 if __name__ == '__main__':
     unittest.main()
