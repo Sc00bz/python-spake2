@@ -1,41 +1,80 @@
 
 class IntegerGroup:
+    element_class = _GroupElement
+
     def __init__(self, p, q, g):
         # these are the public system parameters
-        self.p = p
-        self.q = q
-        self.g = g
-        self.size_bits = size_bits(self.p)
-        self.size_bytes = size_bytes(self.p)
+        self.p = p # the field size
+        self.q = q # the subgroup order, used for scalars
+        self.g = g # generator of the subgroup
+        self.element_size_bits = size_bits(self.p)
+        self.element_size_bytes = size_bytes(self.p)
+        self.scalar_size_bytes = size_bytes(self.q)
         self.U = random unknown-dlog group element
         self.V = random unknown-dlog group element
 
     def random_element(self, entropy_f):
-        # the multiplicative group for Zp ..
         exp = util.random_integer(self.q, entropy_f)
-        element = scalarmult(self.g, exp)
+        element = self.scalarmult(self.g, exp)
         return exp, element
 
     def scalar_to_bytes(self, i):
         # both for hashing into transcript, and save/restore of intermediate
         # state
-        return bytes
-    def scalar_from_bytes(self, bytes):
+        assert isinstance(b, (int, long))
+        assert 0 <= 0 < self.q
+        return utils.number_to_bytes(i, self.q)
+
+    def scalar_from_bytes(self, b):
+        # for restore of intermediate state, and password_to_scalar .
+        # Note that encoded scalars are stored locally, and not accepted
+        # from external attackers.
+        assert isinstance(b, bytes)
+        assert len(b) == self.scalar_size_bytes
+        i = util.bytes_to_number(b)
+        assert 0 <= i < self.q
         return i
+
     def element_to_bytes(self, e):
-        return bytes
+        # for sending to other side, and hashing into transcript
+        assert isinstance(e, _GroupElement)
+        assert e.group is self
+        return util.number_to_bytes(e._x, self.p)
+
+    def element_from_bytes(self, b):
+        # for receiving from other side: test group membership here
+        assert isinstance(b, bytes)
+        assert len(b) == self.element_size_bytes
+        i = util.bytes_to_number(b)
+        assert 1 <= i < self.p  # Zp* excludes 0
+        return self.element_class(self, i)
+
     def scalarmult(self, e1, i):
-        i = i % self.q # handles negatives
-        return e2
+        assert isinstance(e1, _GroupElement)
+        assert e1.group is self
+        assert isinstance(i, (int, long))
+        return self.element_class(self, pow(e1._x, i % self.q, self.p))
 
     def add(self, e1, e2):
-        return e3
+        assert isinstance(e1, _GroupElement)
+        assert e1.group is self
+        assert isinstance(e2, _GroupElement)
+        assert e2.group is self
+        return self.element_class(self, (e1._x * e2._x) % self.p)
 
     def invert_scalar(self, i):
-        return self.g - i
+        assert isinstance(i, (int, long))
+        return (-i) % self.q
 
-def password_to_scalar(pw):
-    return int
+    def password_to_scalar(self, pw):
+        # I don't think this needs to be uniform
+        assert isinstance(pw, bytes)
+        raw_b = hashlib.sha256(pw).digest()
+        b = raw_b.zfill(self.scalar_size_bytes)[-self.scalar_size_bytes:]
+        #return self.scalar_from_bytes(
+        return int
+
+
 
 # x = random(Zp)
 # X = scalarmult(g, x)
@@ -50,20 +89,21 @@ def password_to_scalar(pw):
 
 # to serialize intermediate state, just remember x and A-vs-B
 
-class GroupElement:
-    def __init__(self):
-        self.group = group
+class _GroupElement:
+    def __init__(self, group, x):
+        self._group = group
+        self._x = x
 
     def __mul__(self, other):
         if not isinstance(other, (int, long)):
             raise TypeError("GroupElement*N requires N be a scalar")
-        return self.group.scalarmult(self, other)
+        return self._group.scalarmult(self, other)
 
     def __add__(self, other):
         if not (isinstance(other, GroupElement) and
-                other.group is self.group):
+                other.group is self._group):
             raise TypeError("GroupElement+X requires X to be another group element")
-
+        return self._group.add(self, other)
 
 # hm, PAKE2+, can we stretch pi1? server stores g^(scrypt(pi1)), client
 # computes with int^(scrypt(pi1)) instead of int^pi1 ? hm, server-stored
