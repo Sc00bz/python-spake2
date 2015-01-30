@@ -7,10 +7,68 @@ class IntegerGroup:
         self.g = g
         self.size_bits = size_bits(self.p)
         self.size_bytes = size_bytes(self.p)
+        self.U = random unknown-dlog group element
+        self.V = random unknown-dlog group element
 
     def random_element(self, entropy_f):
         # the multiplicative group for Zp ..
-        return util.random_integer(self.q, entropy_f)
+        exp = util.random_integer(self.q, entropy_f)
+        element = scalarmult(self.g, exp)
+        return exp, element
+
+    def scalar_to_bytes(self, i):
+        # both for hashing into transcript, and save/restore of intermediate
+        # state
+        return bytes
+    def scalar_from_bytes(self, bytes):
+        return i
+    def element_to_bytes(self, e):
+        return bytes
+    def scalarmult(self, e1, i):
+        i = i % self.q # handles negatives
+        return e2
+
+    def add(self, e1, e2):
+        return e3
+
+    def invert_scalar(self, i):
+        return self.g - i
+
+def password_to_scalar(pw):
+    return int
+
+# x = random(Zp)
+# X = scalarmult(g, x)
+# X* = X + scalarmult(U, int(pw))
+#  y = random(Zp)
+#  Y = scalarmult(g, y)
+#  Y* = Y + scalarmult(V, int(pw))
+# KA = scalarmult(Y* + scalarmult(V, -int(pw)), x)
+# key = H(idA, idB, X*, Y*, KA)
+#  KB = scalarmult(X* + scalarmult(U, -int(pw)), y)
+#  key = H(idA, idB, X*, Y*, KB)
+
+# to serialize intermediate state, just remember x and A-vs-B
+
+class GroupElement:
+    def __init__(self):
+        self.group = group
+
+    def __mul__(self, other):
+        if not isinstance(other, (int, long)):
+            raise TypeError("GroupElement*N requires N be a scalar")
+        return self.group.scalarmult(self, other)
+
+    def __add__(self, other):
+        if not (isinstance(other, GroupElement) and
+                other.group is self.group):
+            raise TypeError("GroupElement+X requires X to be another group element")
+
+
+# hm, PAKE2+, can we stretch pi1? server stores g^(scrypt(pi1)), client
+# computes with int^(scrypt(pi1)) instead of int^pi1 ? hm, server-stored
+# value can be used in a trial run of the protocol without additional
+# stretching, ergo it might not help. need to consider more.
 
 class Params:
     def __init__(self, p, q, g, u="public_U", v="public_V"):
@@ -35,6 +93,9 @@ class Params:
         self.v_str = v
         self.u = string_to_number(sha256(u.encode("ascii")).digest()) % self.p
         self.v = string_to_number(sha256(v.encode("ascii")).digest()) % self.p
+        # note: these must be elements of the *subgroup*, so %p isn't enough.
+        # Given the very large cofactor (1024-160 bits), I think it's
+        # infeasible to find an element this way.
         self.inv_u = inverse_mod(self.u, self.p)
         self.inv_v = inverse_mod(self.v, self.p)
 
