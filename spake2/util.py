@@ -46,17 +46,22 @@ def list_of_ints_to_number(l):
     s = "".join(["%02x" % b for b in l])
     return int(s, 16)
 
-def random_integer(maxval, entropy_f=os.urandom):
-    """
-    Return a random integer k such that 0 <= k < maxval, uniformly
-    distributed across that range. For integer groups (Zp), this
-    provides a random group element.
+def unbiased_randrange(start, stop, entropy_f=os.urandom):
+    """Return a random integer k such that start <= k < stop, uniformly
+    distributed across that range, like random.randrange but
+    cryptographically bound and unbiased.
+
+    r(0,p) provides a random group element of the integer group Zp.
+    r(1,p) provides a random group element of the integer group Zp*.
     """
 
     # we generate a random binary string up to 7 bits larger than we really
     # need, mask that down to be the right number of bits, then compare
     # against the range and try again if it's wrong. This will take a random
     # number of tries, but on average less than two
+
+    # first we get 0<=number<(stop-start)
+    maxval = stop - start
 
     top_byte_mask_int, num_bytes = generate_mask(maxval)
     while True:
@@ -66,4 +71,4 @@ def random_integer(maxval, entropy_f=os.urandom):
         candidate_int = list_of_ints_to_number(candidate_bytes)
         #print ["0x%02x" % b for b in candidate_bytes], candidate_int
         if candidate_int < maxval:
-            return candidate_int
+            return start + candidate_int

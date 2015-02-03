@@ -85,17 +85,17 @@ class Utils(unittest.TestCase):
         self.failUnlessEqual(l2n([0xff]), 0xff)
         self.failUnlessEqual(l2n([0x01, 0x00]), 0x0100)
 
-    def test_random_integer(self):
+    def test_unbiased_randrange(self):
         for seed in range(1000):
-            self.do_test_random_integer(254, seed)
-            self.do_test_random_integer(255, seed)
-            self.do_test_random_integer(256, seed)
-            self.do_test_random_integer(257, seed)
+            self.do_test_unbiased_randrange(0, 254, seed)
+            self.do_test_unbiased_randrange(0, 255, seed)
+            self.do_test_unbiased_randrange(0, 256, seed)
+            self.do_test_unbiased_randrange(0, 257, seed)
+            self.do_test_unbiased_randrange(1, 257, seed)
 
-    def do_test_random_integer(self, maxval, seed):
-        num = util.random_integer(maxval, entropy=FakeRandom(seed))
-        self.failUnless(num >= 0)
-        self.failUnless(num < maxval, (num, seed))
+    def do_test_unbiased_randrange(self, start, stop, seed):
+        num = util.unbiased_randrange(start, stop, entropy_f=FakeRandom(seed))
+        self.failUnless(start <= num < stop, (num, seed))
 
 class FakeRandom:
     def __init__(self, seed):
