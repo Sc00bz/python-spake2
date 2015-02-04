@@ -46,7 +46,7 @@ def list_of_ints_to_number(l):
     s = "".join(["%02x" % b for b in l])
     return int(s, 16)
 
-def unbiased_randrange(start, stop, entropy_f=os.urandom):
+def unbiased_randrange(start, stop, entropy_f=None):
     """Return a random integer k such that start <= k < stop, uniformly
     distributed across that range, like random.randrange but
     cryptographically bound and unbiased.
@@ -59,6 +59,8 @@ def unbiased_randrange(start, stop, entropy_f=os.urandom):
     # need, mask that down to be the right number of bits, then compare
     # against the range and try again if it's wrong. This will take a random
     # number of tries, but on average less than two
+    if not entropy_f:
+        entropy_f = os.urandom
 
     # first we get 0<=number<(stop-start)
     maxval = stop - start

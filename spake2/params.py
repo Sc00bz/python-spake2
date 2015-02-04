@@ -14,7 +14,7 @@ class Params:
         self.group = group
         self.M = group.arbitrary_element(seed=M)
         self.N = group.arbitrary_element(seed=N)
-        self.M_str = m
+        self.M_str = M
         self.N_str = N
 
 # Params1024 is roughly as secure as an 80-bit symmetric key, and uses a

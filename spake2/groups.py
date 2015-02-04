@@ -14,15 +14,18 @@ class _GroupElement:
 
     def __add__(self, other):
         if not (isinstance(other, _GroupElement) and
-                other.group is self._group):
+                other._group is self._group):
             raise TypeError("GroupElement+X requires X to be another group element")
         return self._group.add(self, other)
 
     def __sub__(self, other):
         if not (isinstance(other, _GroupElement) and
-                other.group is self._group):
+                other._group is self._group):
             raise TypeError("GroupElement-X requires X to be another group element")
         return self._group.add(self, other * -1)
+
+    def to_bytes(self):
+        return self._group.element_to_bytes(self)
 
 class IntegerGroup:
     element_class = _GroupElement
@@ -44,14 +47,18 @@ class IntegerGroup:
         assert len(_s) >= self.scalar_size_bytes
         self.scalar_hasher = scalar_hasher
 
-    def random_element(self, entropy_f):
-        # we (briefly) know the discrete log of this value
+    def random_scalar(self, entropy_f):
         exp = unbiased_randrange(0, self.q, entropy_f)
-        element = self.scalarmult(self.g, exp)
+        return exp
+
+    def random_element(self, entropy_f):
+        # we know the discrete log of this value
+        exp = self.random_scalar(entropy_f)
+        element = self.scalarmult_base(exp)
         return exp, element
 
     def arbitrary_element(self, seed):
-        # we do *not* learn the discrete log of this one. Nobody should.
+        # we do *not* know the discrete log of this one. Nobody should.
         assert isinstance(seed, bytes)
         processed_seed = self.element_hasher(seed)[:self.element_size_bytes]
         assert isinstance(processed_seed, bytes)
@@ -67,7 +74,8 @@ class IntegerGroup:
         r = (self.p - 1) / self.q
         assert int(r) == r
         h = bytes_to_number(processed_seed) % self.p
-        element = self.scalarmult(h, r)
+        h_elem = self.element_class(self, h)
+        element = self.scalarmult(h_elem, r)
         return element
 
     def scalar_to_bytes(self, i):
@@ -77,20 +85,22 @@ class IntegerGroup:
         assert 0 <= 0 < self.q
         return number_to_bytes(i, self.q)
 
-    def scalar_from_bytes(self, b):
+    def scalar_from_bytes(self, b, allow_wrap):
         # for restore of intermediate state, and password_to_scalar .
         # Note that encoded scalars are stored locally, and not accepted
         # from external attackers.
         assert isinstance(b, bytes)
         assert len(b) == self.scalar_size_bytes
         i = bytes_to_number(b)
-        assert 0 <= i < self.q
+        if allow_wrap: # for password_to_scalar
+            i = i % self.q
+        assert 0 <= i < self.q, (0, i, self.q)
         return i
 
     def element_to_bytes(self, e):
         # for sending to other side, and hashing into transcript
         assert isinstance(e, _GroupElement)
-        assert e.group is self
+        assert e._group is self
         return number_to_bytes(e._x, self.p)
 
     def element_from_bytes(self, b):
@@ -103,15 +113,19 @@ class IntegerGroup:
 
     def scalarmult(self, e1, i):
         assert isinstance(e1, _GroupElement)
-        assert e1.group is self
+        assert e1._group is self
         assert isinstance(i, (int, long))
         return self.element_class(self, pow(e1._x, i % self.q, self.p))
 
+    def scalarmult_base(self, i):
+        e1 = self.element_class(self, self.g)
+        return self.scalarmult(e1, i)
+
     def add(self, e1, e2):
         assert isinstance(e1, _GroupElement)
-        assert e1.group is self
+        assert e1._group is self
         assert isinstance(e2, _GroupElement)
-        assert e2.group is self
+        assert e2._group is self
         return self.element_class(self, (e1._x * e2._x) % self.p)
 
     def invert_scalar(self, i):
@@ -123,7 +137,8 @@ class IntegerGroup:
         b = self.scalar_hasher(pw)
         assert len(b) >= self.scalar_size_bytes
         # I don't think this needs to be uniform
-        return self.scalar_from_bytes(b[:self.scalar_size_bytes])
+        return self.scalar_from_bytes(b[:self.scalar_size_bytes],
+                                      allow_wrap=True)
 
 def sha256(b):
     return hashlib.sha256(b).digest()
