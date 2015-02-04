@@ -1,10 +1,27 @@
 
 import unittest
 from .spake2 import (SPAKE2, SPAKE2_A, SPAKE2_B, PAKEError)
-from . import util
+from . import util, groups
 from binascii import hexlify
 from hashlib import sha256
 import json
+from itertools import count
+
+class FakeRandom:
+    def __init__(self, seed):
+        assert isinstance(seed, int), repr(seed)
+        self.seed = seed
+        self.make_blocks = self._make_blocks()
+        self.data = b""
+    def _make_blocks(self):
+        for i in count(0):
+            yield sha256(("%d-%d" % (self.seed, i)).encode("ascii")).digest()
+    def __call__(self, num_bytes):
+        while len(self.data) < num_bytes:
+            self.data += self.make_blocks.next()
+        ret = self.data[:num_bytes]
+        self.data = self.data[num_bytes:]
+        return ret
 
 class Utils(unittest.TestCase):
     def test_binsize(self):
@@ -96,14 +113,43 @@ class Utils(unittest.TestCase):
         num = util.unbiased_randrange(start, stop, entropy_f=FakeRandom(seed))
         self.failUnless(start <= num < stop, (num, seed))
 
-class FakeRandom:
-    def __init__(self, seed):
-        self.data = sha256(str(seed).encode("ascii")).digest()
-    def __call__(self, num_bytes):
-        assert num_bytes < len(self.data)
-        ret = self.data[:num_bytes]
-        self.data = self.data[num_bytes:]
-        return ret
+class Group(unittest.TestCase):
+    def failUnlessElementsEqual(self, e1, e2):
+        self.failUnlessEqual(hexlify(e1.to_bytes()),
+                             hexlify(e2.to_bytes()))
+
+    def test_basic(self):
+        g = groups.I1024
+        fr = FakeRandom(0)
+        i = g.random_scalar(entropy_f=fr)
+        self.failUnless(0 <= i < g.q)
+        b = g.scalar_to_bytes(i)
+        self.failUnlessEqual(len(b), g.scalar_size_bytes)
+        self.failUnlessEqual(i, g.scalar_from_bytes(b, False))
+        i,e = g.random_element(entropy_f=fr)
+        self.failUnlessEqual(len(e.to_bytes()), g.element_size_bytes)
+        self.failUnlessEqual(g.scalarmult_base(i).to_bytes(), e.to_bytes())
+        e = g.arbitrary_element(b"")
+        self.failUnlessEqual(len(e.to_bytes()), g.element_size_bytes)
+        self.failUnlessElementsEqual(e, g.element_from_bytes(e.to_bytes()))
+
+    def test_math(self):
+        g = groups.I1024
+        e1 = g.scalarmult_base(1)
+        e2 = g.scalarmult_base(2)
+        self.failUnlessElementsEqual(e1 + e1, e1 * 2)
+        self.failUnlessElementsEqual(e1 * 2, e2)
+        self.failUnlessElementsEqual(e1 + e2, e2 + e1)
+        e3 = g.scalarmult_base(3)
+        e4 = g.scalarmult_base(4)
+        e5 = g.scalarmult_base(5)
+        self.failUnlessElementsEqual(e2+e3, e1+e4)
+        self.failUnlessElementsEqual(e5 - e3, e2)
+
+    def test_password(self):
+        g = groups.I1024
+        i = g.password_to_scalar(b"")
+        self.failUnless(0 <= i < g.q)
 
 
 class Basic(unittest.TestCase):
