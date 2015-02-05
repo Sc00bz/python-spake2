@@ -1,7 +1,7 @@
 
 import unittest
 from .spake2 import (SPAKE2, SPAKE2_A, SPAKE2_B, PAKEError)
-from . import util, groups
+from . import util, groups, params
 from binascii import hexlify
 from hashlib import sha256
 import json
@@ -146,16 +146,53 @@ class Group(unittest.TestCase):
         self.failUnlessElementsEqual(e2+e3, e1+e4)
         self.failUnlessElementsEqual(e5 - e3, e2)
 
+    def test_blinding(self):
+        g = groups.I1024
+        g = I23
+        fr = FakeRandom(0)
+        pubkey = g.arbitrary_element(b"")
+        U = g.arbitrary_element(b"U")
+        pw = g.random_scalar(fr)
+        blinding_factor = U * pw
+        blinded_pubkey = pubkey + blinding_factor
+        inverse_pw = g.invert_scalar(pw)
+        inverse_blinding_factor = U * inverse_pw
+        self.failUnlessElementsEqual(inverse_blinding_factor, U * -pw)
+        unblinded_pubkey = blinded_pubkey + inverse_blinding_factor
+        self.failUnlessElementsEqual(pubkey, unblinded_pubkey)
+
     def test_password(self):
         g = groups.I1024
         i = g.password_to_scalar(b"")
         self.failUnless(0 <= i < g.q)
 
+    def test_math_trivial(self):
+        g = I23
+        e1 = g.scalarmult_base(1)
+        e2 = g.scalarmult_base(2)
+        e3 = g.scalarmult_base(3)
+        e4 = g.scalarmult_base(4)
+        e5 = g.scalarmult_base(5)
+        e6 = g.scalarmult_base(6)
+        self.failUnlessEqual([e1._x, e2._x, e3._x, e4._x, e5._x, e6._x],
+                             [2, 4, 8, 16, 9, 18])
+        self.failUnlessElementsEqual(e1 + e1, e1 * 2)
+        self.failUnlessElementsEqual(e1 * 2, e2)
+        self.failUnlessElementsEqual(e1 + e2, e2 + e1)
+        self.failUnlessElementsEqual(e2+e3, e1+e4)
+        self.failUnlessElementsEqual(e5 - e3, e2)
+
+I23 = groups.IntegerGroup(p=23, q=11, g=2,
+                          element_hasher=groups.sha256,
+                          scalar_hasher=groups.sha256)
+
 
 class Basic(unittest.TestCase):
     def test_success(self):
         pw = b"password"
-        pA,pB = SPAKE2_A(pw), SPAKE2_B(pw)
+        p = params.Params(I23)
+        p = params.Params1024
+        pA,pB = SPAKE2_A(pw, params=p), SPAKE2_B(pw, params=p)
         m1A,m1B = pA.start(), pB.start()
         kA,kB = pA.finish(m1B), pB.finish(m1A)
         self.failUnlessEqual(hexlify(kA), hexlify(kB))

@@ -25,6 +25,19 @@ class WrongGroupError(Exception):
 SideA = b"A"
 SideB = b"B"
 
+# x = random(Zp)
+# X = scalarmult(g, x)
+# X* = X + scalarmult(M, int(pw))
+#  y = random(Zp)
+#  Y = scalarmult(g, y)
+#  Y* = Y + scalarmult(N, int(pw))
+# KA = scalarmult(Y* + scalarmult(N, -int(pw)), x)
+# key = H(idA, idB, X*, Y*, KA)
+#  KB = scalarmult(X* + scalarmult(M, -int(pw)), y)
+#  key = H(idA, idB, X*, Y*, KB)
+
+# to serialize intermediate state, just remember x and A-vs-B. And U/V.
+
 class SPAKE2:
     """This class manages one side of a SPAKE2 key negotiation.
 
