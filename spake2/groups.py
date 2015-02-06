@@ -47,6 +47,12 @@ class IntegerGroup:
         assert len(_s) >= self.scalar_size_bytes
         self.scalar_hasher = scalar_hasher
 
+        # double-check that the generator has the right order
+        gen = self.element_class(self, self.g)
+        assert (gen * self.q)._x == 1
+
+        self.identity = self.element_class(self, self.g)
+
     def random_scalar(self, entropy_f):
         exp = unbiased_randrange(0, self.q, entropy_f)
         return exp
@@ -74,9 +80,14 @@ class IntegerGroup:
         r = (self.p - 1) / self.q
         assert int(r) == r
         h = bytes_to_number(processed_seed) % self.p
-        h_elem = self.element_class(self, h)
-        element = self.scalarmult(h_elem, r)
+        element = self.element_class(self, pow(h, r, self.p))
+        assert self.is_member(element)
         return element
+
+    def is_member(self, e):
+        if not e._group is self: return False
+        if pow(e._x, self.q, self.p) == 1: return True
+        return False
 
     def scalar_to_bytes(self, i):
         # both for hashing into transcript, and save/restore of

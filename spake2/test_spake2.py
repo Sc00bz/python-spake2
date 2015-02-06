@@ -114,9 +114,12 @@ class Utils(unittest.TestCase):
         self.failUnless(start <= num < stop, (num, seed))
 
 class Group(unittest.TestCase):
-    def failUnlessElementsEqual(self, e1, e2):
+    def failUnlessElementsEqual(self, e1, e2, msg=None):
         self.failUnlessEqual(hexlify(e1.to_bytes()),
-                             hexlify(e2.to_bytes()))
+                             hexlify(e2.to_bytes()), msg)
+    def failIfElementsEqual(self, e1, e2, msg=None):
+        self.failIfEqual(hexlify(e1.to_bytes()),
+                         hexlify(e2.to_bytes()), msg)
 
     def test_basic(self):
         g = groups.I1024
@@ -135,29 +138,61 @@ class Group(unittest.TestCase):
 
     def test_math(self):
         g = groups.I1024
-        e1 = g.scalarmult_base(1)
-        e2 = g.scalarmult_base(2)
+        sb = g.scalarmult_base
+        e_zero = sb(0)
+        e1 = sb(1)
+        e2 = sb(2)
+        self.failUnlessElementsEqual(e1 + e_zero, e1)
         self.failUnlessElementsEqual(e1 + e1, e1 * 2)
         self.failUnlessElementsEqual(e1 * 2, e2)
         self.failUnlessElementsEqual(e1 + e2, e2 + e1)
-        e3 = g.scalarmult_base(3)
-        e4 = g.scalarmult_base(4)
-        e5 = g.scalarmult_base(5)
+        e_m1 = sb(g.q-1)
+        self.failUnlessElementsEqual(e_m1, sb(-1))
+        self.failUnlessElementsEqual(e_m1 + e1, e_zero)
+        e3 = sb(3)
+        e4 = sb(4)
+        e5 = sb(5)
         self.failUnlessElementsEqual(e2+e3, e1+e4)
         self.failUnlessElementsEqual(e5 - e3, e2)
+        self.failUnlessElementsEqual(e1 * g.q, e_zero)
+        self.failUnlessElementsEqual(e2 * g.q, e_zero)
+        self.failUnlessElementsEqual(e3 * g.q, e_zero)
+        self.failUnlessElementsEqual(e4 * g.q, e_zero)
+        self.failUnlessElementsEqual(e5 * g.q, e_zero)
+
+    def test_is_member(self):
+        g = groups.I1024
+        zero = g.identity
+        fr = FakeRandom(0)
+        self.failUnless(g.is_member(g.identity))
+        self.failUnless(g.is_member(g.scalarmult_base(2)))
+        self.failUnless(g.is_member(g.scalarmult_base(3)))
+        self.failUnless(g.is_member(g.random_element(fr)[1]))
+
+    def test_arbitrary_element(self):
+        g = groups.I1024
+        gx = g.arbitrary_element(b"")
+        # arbitrary_element once had a bug, it returned elements that were
+        # not in the subgroup. Test against that.
+        self.failUnless(g.is_member(gx))
+        self.failUnlessElementsEqual(gx*-2, (gx*2)*-1)
+        gy = g.arbitrary_element(b"2")
+        self.failIfElementsEqual(gx, gy)
 
     def test_blinding(self):
         g = groups.I1024
-        g = I23
         fr = FakeRandom(0)
-        pubkey = g.arbitrary_element(b"")
-        U = g.arbitrary_element(b"U")
+        _, pubkey = g.random_element(fr)
+        _, U = g.random_element(fr)
         pw = g.random_scalar(fr)
+        # X+U*pw -U*pw == X
         blinding_factor = U * pw
         blinded_pubkey = pubkey + blinding_factor
         inverse_pw = g.invert_scalar(pw)
         inverse_blinding_factor = U * inverse_pw
         self.failUnlessElementsEqual(inverse_blinding_factor, U * -pw)
+        self.failUnlessElementsEqual(U * -pw, (U * pw) * -1)
+        self.failUnlessElementsEqual(inverse_blinding_factor, blinding_factor * -1)
         unblinded_pubkey = blinded_pubkey + inverse_blinding_factor
         self.failUnlessElementsEqual(pubkey, unblinded_pubkey)
 
@@ -190,7 +225,6 @@ I23 = groups.IntegerGroup(p=23, q=11, g=2,
 class Basic(unittest.TestCase):
     def test_success(self):
         pw = b"password"
-        p = params.Params(I23)
         p = params.Params1024
         pA,pB = SPAKE2_A(pw, params=p), SPAKE2_B(pw, params=p)
         m1A,m1B = pA.start(), pB.start()
