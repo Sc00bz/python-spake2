@@ -161,8 +161,6 @@ class SPAKE2:
         return outbound_side_and_message
 
     def compute_outbound_message(self):
-        blinded_pubkey = self.MN * self.pw_scalar
-        print "%s bpw out: %s" % (self.side, hexlify(blinded_pubkey.to_bytes()))
         message_elem = self.xy_elem + (self.MN * self.pw_scalar)
         self.outbound_message = message_elem.to_bytes()
 
@@ -186,21 +184,11 @@ class SPAKE2:
 
         group = self.params.group
         inbound_elem = group.element_from_bytes(inbound_message)
-        blinded_pubkey = self.NM * -self.pw_scalar
-        print "%s bpw in: %s" % (self.side, hexlify(blinded_pubkey.to_bytes()))
         K_elem = (inbound_elem + (self.NM * -self.pw_scalar)) * self.xy_exp
         K_bytes = K_elem.to_bytes()
         transcript = b":".join([self.idA, self.idB,
                                 X_msg, Y_msg, K_bytes,
                                 self.pw])
-        print
-        print "TRANSCRIPT:"
-        print "idA:", hexlify(self.idA)
-        print "idB:", hexlify(self.idB)
-        print "X_msg:", len(X_msg), hexlify(X_msg)
-        print "Y_msg:", len(Y_msg), hexlify(Y_msg)
-        print "K_bytes:", len(K_bytes), hexlify(K_bytes)
-        print "pw:", len(self.pw), hexlify(self.pw)
         key = sha256(transcript).digest()
         return key
 
