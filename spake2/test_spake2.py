@@ -1,27 +1,25 @@
 
 import unittest
-from .spake2 import (SPAKE2, SPAKE2_A, SPAKE2_B, PAKEError)
+from .spake2 import (SPAKE2, SPAKE2_A, SPAKE2_B,
+                     SerializedTooEarly, BadSide)
 from . import util, groups, params
 from binascii import hexlify
 from hashlib import sha256
-import json
 from itertools import count
 
-class FakeRandom:
+class PRG:
+    # this returns a callable which, when invoked with an integer N, will
+    # return N pseudorandom bytes derived from the seed
     def __init__(self, seed):
-        assert isinstance(seed, int), repr(seed)
-        self.seed = seed
-        self.make_blocks = self._make_blocks()
-        self.data = b""
-    def _make_blocks(self):
-        for i in count(0):
-            yield sha256(("%d-%d" % (self.seed, i)).encode("ascii")).digest()
-    def __call__(self, num_bytes):
-        while len(self.data) < num_bytes:
-            self.data += self.make_blocks.next()
-        ret = self.data[:num_bytes]
-        self.data = self.data[num_bytes:]
-        return ret
+        self.generator = self.block_generator(seed)
+
+    def __call__(self, numbytes):
+        return "".join([self.generator.next() for i in range(numbytes)])
+
+    def block_generator(self, seed):
+        for counter in count():
+            for byte in sha256("prng-%d-%s" % (counter, seed)).digest():
+                yield byte
 
 class Utils(unittest.TestCase):
     def test_binsize(self):
@@ -110,7 +108,7 @@ class Utils(unittest.TestCase):
             self.do_test_unbiased_randrange(1, 257, seed)
 
     def do_test_unbiased_randrange(self, start, stop, seed):
-        num = util.unbiased_randrange(start, stop, entropy_f=FakeRandom(seed))
+        num = util.unbiased_randrange(start, stop, entropy_f=PRG(seed))
         self.failUnless(start <= num < stop, (num, seed))
 
 class Group(unittest.TestCase):
@@ -123,7 +121,7 @@ class Group(unittest.TestCase):
 
     def test_basic(self):
         g = groups.I1024
-        fr = FakeRandom(0)
+        fr = PRG(0)
         i = g.random_scalar(entropy_f=fr)
         self.failUnless(0 <= i < g.q)
         b = g.scalar_to_bytes(i)
@@ -162,8 +160,7 @@ class Group(unittest.TestCase):
 
     def test_is_member(self):
         g = groups.I1024
-        zero = g.identity
-        fr = FakeRandom(0)
+        fr = PRG(0)
         self.failUnless(g.is_member(g.identity))
         self.failUnless(g.is_member(g.scalarmult_base(2)))
         self.failUnless(g.is_member(g.scalarmult_base(3)))
@@ -181,7 +178,7 @@ class Group(unittest.TestCase):
 
     def test_blinding(self):
         g = groups.I1024
-        fr = FakeRandom(0)
+        fr = PRG(0)
         _, pubkey = g.random_element(fr)
         _, U = g.random_element(fr)
         pw = g.random_scalar(fr)
@@ -226,82 +223,66 @@ class Basic(unittest.TestCase):
     def test_success(self):
         pw = b"password"
         p = params.Params1024
-        pA,pB = SPAKE2_A(pw, params=p), SPAKE2_B(pw, params=p)
-        m1A,m1B = pA.start(), pB.start()
-        kA,kB = pA.finish(m1B), pB.finish(m1A)
+        sA,sB = SPAKE2_A(pw, params=p), SPAKE2_B(pw, params=p)
+        m1A,m1B = sA.start(), sB.start()
+        kA,kB = sA.finish(m1B), sB.finish(m1A)
         self.failUnlessEqual(hexlify(kA), hexlify(kB))
         self.failUnlessEqual(len(kA), len(sha256().digest()))
 
     def test_failure(self):
         pw = b"password"
-        pA,pB = SPAKE2_A(pw), SPAKE2_B(b"passwerd")
-        m1A,m1B = pA.start(), pB.start()
-        kA,kB = pA.finish(m1B), pB.finish(m1A)
+        sA,sB = SPAKE2_A(pw), SPAKE2_B(b"passwerd")
+        m1A,m1B = sA.start(), sB.start()
+        kA,kB = sA.finish(m1B), sB.finish(m1A)
         self.failIfEqual(hexlify(kA), hexlify(kB))
         self.failUnlessEqual(len(kA), len(sha256().digest()))
         self.failUnlessEqual(len(kB), len(sha256().digest()))
 
 class Parameters(unittest.TestCase):
-    def do_tests(self, params):
+    def do_tests(self, p):
         pw = b"password"
-        pA,pB = SPAKE2_A(pw, params=params), SPAKE2_B(pw, params=params)
-        m1A,m1B = pA.start(), pB.start()
+        sA,sB = SPAKE2_A(pw, params=p), SPAKE2_B(pw, params=p)
+        m1A,m1B = sA.start(), sB.start()
         #print len(json.dumps(m1A))
-        kA,kB = pA.finish(m1B), pB.finish(m1A)
+        kA,kB = sA.finish(m1B), sB.finish(m1A)
         self.failUnlessEqual(hexlify(kA), hexlify(kB))
         self.failUnlessEqual(len(kA), len(sha256().digest()))
 
-        pA,pB = SPAKE2_A(pw, params=params), SPAKE2_B(b"passwerd", params=params)
-        m1A,m1B = pA.start(), pB.start()
-        kA,kB = pA.finish(m1B), pB.finish(m1A)
+        sA,sB = SPAKE2_A(pw, params=p), SPAKE2_B(b"passwerd", params=p)
+        m1A,m1B = sA.start(), sB.start()
+        kA,kB = sA.finish(m1B), sB.finish(m1A)
         self.failIfEqual(hexlify(kA), hexlify(kB))
         self.failUnlessEqual(len(kA), len(sha256().digest()))
         self.failUnlessEqual(len(kB), len(sha256().digest()))
 
     def test_params(self):
-        for params in [params_80, params_112, params_128]:
-            self.do_tests(params)
+        for p in [params.Params1024, params.Params2048, params.Params3072]:
+            self.do_tests(p)
 
-    def test_default_is_80(self):
+    def test_default_is_1024(self):
         pw = b"password"
-        pA,pB = SPAKE2_A(pw, params=params_80), SPAKE2_B(pw)
-        m1A,m1B = pA.start(), pB.start()
-        kA,kB = pA.finish(m1B), pB.finish(m1A)
+        sA,sB = SPAKE2_A(pw, params=params.Params1024), SPAKE2_B(pw)
+        m1A,m1B = sA.start(), sB.start()
+        kA,kB = sA.finish(m1B), sB.finish(m1A)
         self.failUnlessEqual(hexlify(kA), hexlify(kB))
         self.failUnlessEqual(len(kA), len(sha256().digest()))
 
 
-class PRNG:
-    # this returns a callable which, when invoked with an integer N, will
-    # return N pseudorandom bytes.
-    def __init__(self, seed):
-        self.generator = self.block_generator(seed)
-
-    def __call__(self, numbytes):
-        return "".join([self.generator.next() for i in range(numbytes)])
-
-    def block_generator(self, seed):
-        counter = 0
-        while True:
-            for byte in sha256("prng-%d-%s" % (counter, seed)).digest():
-                yield byte
-            counter += 1
-
 class OtherEntropy(unittest.TestCase):
     def test_entropy(self):
-        entropy = PRNG("seed")
+        fr = PRG("seed")
         pw = b"password"
-        pA,pB = SPAKE2_A(pw, entropy=entropy), SPAKE2_B(pw, entropy=entropy)
-        m1A1,m1B1 = pA.start(), pB.start()
-        kA1,kB1 = pA.finish(m1B1), pB.finish(m1A1)
+        sA,sB = SPAKE2_A(pw, entropy_f=fr), SPAKE2_B(pw, entropy_f=fr)
+        m1A1,m1B1 = sA.start(), sB.start()
+        kA1,kB1 = sA.finish(m1B1), sB.finish(m1A1)
         self.failUnlessEqual(hexlify(kA1), hexlify(kB1))
 
         # run it again with the same entropy stream: all messages should be
         # identical
-        entropy = PRNG("seed")
-        pA,pB = SPAKE2_A(pw, entropy=entropy), SPAKE2_B(pw, entropy=entropy)
-        m1A2,m1B2 = pA.start(), pB.start()
-        kA2,kB2 = pA.finish(m1B2), pB.finish(m1A2)
+        fr = PRG("seed")
+        sA,sB = SPAKE2_A(pw, entropy_f=fr), SPAKE2_B(pw, entropy_f=fr)
+        m1A2,m1B2 = sA.start(), sB.start()
+        kA2,kB2 = sA.finish(m1B2), sB.finish(m1A2)
         self.failUnlessEqual(hexlify(kA2), hexlify(kB2))
 
         self.failUnlessEqual(m1A1, m1A2)
@@ -311,35 +292,23 @@ class OtherEntropy(unittest.TestCase):
 
 class Serialize(unittest.TestCase):
     def replace(self, orig):
-        data = json.dumps(orig.to_json())
+        data = orig.serialize()
         #print len(data)
-        return SPAKE2.from_json(json.loads(data))
+        return SPAKE2.from_serialized(data)
 
     def test_serialize(self):
         pw = b"password"
-        pA,pB = SPAKE2_A(pw), SPAKE2_B(pw)
-        pA = self.replace(pA)
-        m1A,m1B = pA.start(), pB.start()
-        pA = self.replace(pA)
-        kA,kB = pA.finish(m1B), pB.finish(m1A)
-        self.failUnlessEqual(hexlify(kA), hexlify(kB))
-        self.failUnlessEqual(len(kA), len(sha256().digest()))
-
-class Packed(unittest.TestCase):
-    def test_pack(self):
-        pw = b"password"
-        pA,pB = SPAKE2_A(pw), SPAKE2_B(pw)
-        m1A,m1B = pA.start(), pB.start()
-        m1Ap = pA.pack_msg(m1A)
-        #print "m1:", len(json.dumps(m1A)), len(m1Ap)
-        kA,kB = pA.finish(m1B), pB.finish(pB.unpack_msg(m1Ap))
+        sA,sB = SPAKE2_A(pw), SPAKE2_B(pw)
+        self.failUnlessRaises(SerializedTooEarly, self.replace, sA)
+        m1A,m1B = sA.start(), sB.start()
+        sA = self.replace(sA)
+        kA,kB = sA.finish(m1B), sB.finish(m1A)
         self.failUnlessEqual(hexlify(kA), hexlify(kB))
         self.failUnlessEqual(len(kA), len(sha256().digest()))
 
 class Errors(unittest.TestCase):
     def test_bad_side(self):
-        self.failUnlessRaises(PAKEError,
-                              SPAKE2, b"password", "R", params_80)
+        self.failUnlessRaises(BadSide, SPAKE2, b"password", "R")
 
 if __name__ == '__main__':
     unittest.main()

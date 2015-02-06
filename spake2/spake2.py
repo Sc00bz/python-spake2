@@ -8,18 +8,20 @@ from .params import Params, Params1024
 
 class PAKEError(Exception):
     pass
-class OnlyCallStartOnce(Exception):
+class BadSide(PAKEError):
+    pass
+class OnlyCallStartOnce(PAKEError):
     """start() may only be called once. Re-using a SPAKE2 instance is likely
     to reveal the password or the derived key."""
-class OnlyCallFinishOnce(Exception):
+class OnlyCallFinishOnce(PAKEError):
     """finish() may only be called once. Re-using a SPAKE2 instance is likely
     to reveal the password or the derived key."""
-class OffSides(Exception):
+class OffSides(PAKEError):
     """I received a message from someone on the same side that I'm on: I was
     expecting the opposite side."""
-class SerializedTooEarly(Exception):
+class SerializedTooEarly(PAKEError):
     pass
-class WrongGroupError(Exception):
+class WrongGroupError(PAKEError):
     pass
 
 SideA = b"A"
@@ -131,7 +133,7 @@ class SPAKE2:
         elif side == SideB:
             (self.MN, self.NM) = (params.N, params.M)
         else:
-            raise PAKEError("side= must be either SideA or SideB")
+            raise BadSide("side= must be either SideA or SideB")
         self.side = side
 
         assert isinstance(idA, bytes), repr(idA)
@@ -200,11 +202,12 @@ class SPAKE2:
         # disagreement. Any changes to the group or the M/N seeds should
         # cause this to change.
         group = self.params.group
-        return sha256(b"".join([group.arbitrary_element(b""),
-                                group.password_to_scalar(b""),
-                                self.params.M.to_bytes(),
-                                self.params.N.to_bytes(),
-                                ])).hexdigest()
+        pieces = [group.arbitrary_element(b"").to_bytes(),
+                  group.scalar_to_bytes(group.password_to_scalar(b"")),
+                  self.params.M.to_bytes(),
+                  self.params.N.to_bytes(),
+                  ]
+        return sha256(b"".join(pieces)).hexdigest()
 
     def serialize(self):
         if not self._started:
@@ -214,7 +217,7 @@ class SPAKE2:
              "side": self.side,
              "idA": hexlify(self.idA),
              "idB": hexlify(self.idB),
-             "pw": hexlify(self.pw),
+             "password": hexlify(self.pw),
              "xy_exp": hexlify(group.scalar_to_bytes(self.xy_exp)),
              }
         return json.dumps(d).encode("ascii")
