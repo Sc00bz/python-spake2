@@ -5,9 +5,9 @@
 * Dependencies: none (pure-python)
 * [![Build Status](https://travis-ci.org/warner/python-spake2.png?branch=master)](https://travis-ci.org/warner/python-spake2) [![Coverage Status](https://coveralls.io/repos/warner/python-spake2/badge.svg)](https://coveralls.io/r/warner/python-spake2)
 
-This library implements the SPAKE2 password-authenticated key exchange
-("PAKE") algorithm. This allows two parties, who share a weak password, to
-safely derive a strong shared secret (and therefore build an
+This library implements the SPAKE2 and SPAKE2+ password-authenticated key
+exchange ("PAKE") algorithms. This allows two parties, who share a weak
+password, to safely derive a strong shared secret (and therefore build an
 encrypted+authenticated channel).
 
 A passive attacker who eavesdrops on the connection learns no information
@@ -324,25 +324,63 @@ To run the built-in test suite from a source directory, do:
 
 The tests take approximately two seconds on my computer.
 
+## SPAKE2+
+
+There is an additional protocol named "SPAKE2+", which is an "augmented" form
+of PAKE. Augmented PAKE changes changes one side (typically a server) to
+record a derivative of the password instead of the actual password. In
+SPAKE2+, a server compromise does not immediately give access to the
+passwords: instead, the attacker must perform an offline dictionary attack
+against the stolen data before they can learn the passwords. In contrast,
+"symmetric PAKE" (such as SPAKE2) records the same password on both sides, so
+a server compromise would allow the attacker to immediately present
+themselves as the client, as well as revealing a password that might have
+been reused on other systems.
+
+The API for SPAKE2+ uses two classes: `SPAKE2Plus_Client` and
+`SPAKE2Plus_Server`, with the same shared parameters as above. However, the
+server class must be instantiated with a "Verifier" bytestring instead of the
+raw password. This verifier is computed with an additional function
+`SPAKE2Plus_compute_verifier()` that takes the raw password and the shared
+parameters. Typically the client will compute the verifier string locally and
+give it to the server during account creation.
+
+```python
+from spake2 import SPAKE2Plus_compute_verifier
+verifier = SPAKE2Plus_compute_verifier(b"my password")
+```
+
+```python
+from spake2 import SPAKE2Plus_Client
+c = SPAKE2Plus_Client(b"my password")
+msg_out = c.start()
+send(msg_out) # this is message client->server
+msg_in = receive()
+key = c.finish(msg_in)
+```
+
+```python
+from spake2 import SPAKE2Plus_Server
+s = SPAKE2Plus_Server(verifier)
+msg_out = s.start()
+send(msg_out)
+msg_in = receive() # this is message client->server
+key = s.finish(msg_in)
+```
+
 ## History
 
-The protocol was described as "PAKE2" in ["cryptobook"] [2] from Dan Boneh
-and Victor Shoup. This is a form of "SPAKE2", defined by Abdalla and
-Pointcheval at [RSA 2005] [3]. Additional recommendations for groups and
-distinguished elements were published in [Ladd's IETF draft] [4].
+SPAKE2 was defined by Abdalla and Pointcheval at [RSA 2005] [3]. The
+augmented SPAKE2+ was defined by Cash, Kiltz, and Shoup in section 9 of
+[Twin-DH 2009] [6]. These protocols are described as "PAKE2" and "PAKE2+" in
+["cryptobook"] [2] by Dan Boneh and Victor Shoup. Additional recommendations
+for groups and distinguished elements were published in [Ladd's IETF draft]
+[4].
 
 The Ed25519 implementation uses code adapted from Daniel Bernstein (djb),
 Matthew Dempsky, Daniel Holth, Ron Garret, with further optimizations by
 Brian Warner[5]. The "arbitrary element" computation, which must be the same
 for both participants, is from python-pure25519 version 0.5.
-
-The Boneh/Shoup chapter that defines PAKE2 also defines an augmented variant
-named "PAKE2+", which changes one side (typically a server) to record a
-derivative of the password instead of the actual password. In PAKE2+, a
-server compromise does not immediately give access to the passwords: instead,
-the attacker must perform an offline dictionary attack against the stolen
-data before they can learn the passwords. PAKE2+ support is planned, but not
-yet implemented.
 
 Brian Warner first wrote this Python version in July 2010.
 
@@ -353,3 +391,4 @@ Brian Warner first wrote this Python version in July 2010.
 [3]: http://www.di.ens.fr/~pointche/Documents/Papers/2005_rsa.pdf "RSA 2005"
 [4]: https://tools.ietf.org/html/draft-ladd-spake2-01 "Ladd's IETF draft"
 [5]: https://github.com/warner/python-pure25519
+[6]: "The Twin Diffie-Hellman Problem and Applications", David Cash, Eike Kiltz, Victor Shoup, February 10, 2009 "Twin-DH 2009"
